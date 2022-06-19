@@ -1,0 +1,121 @@
+---
+title: "NYPD shooting research"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intoduction
+
+My research will assist NYPD in allocating its resources in the most effective way to prevent murders in New York.
+Specifically, I will concentrate on the time intervals during the day and during the week when most murders happen.
+
+### Libraries
+```{r message = FALSE}
+  library(tidyr)
+  library(tidyverse)
+  library(lubridate)
+```
+
+### Data transformation
+
+``` {r message = FALSE}
+#reading the file
+dataset_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_dataset <- read_csv(dataset_url)
+
+#removing unused columns
+nypd_dataset_subset <- nypd_dataset[ , c("INCIDENT_KEY","OCCUR_DATE", "OCCUR_TIME", "STATISTICAL_MURDER_FLAG", "PERP_AGE_GROUP", "PERP_SEX", "VIC_AGE_GROUP", "VIC_SEX")]
+
+#combining dates into a single column
+nypd_dataset_subset$incident_date_time <- with(nypd_dataset_subset, mdy_hms(paste(OCCUR_DATE, OCCUR_TIME, sep='T')))
+nypd_dataset_subset <- nypd_dataset_subset %>% select(-c(OCCUR_DATE,OCCUR_TIME))
+
+#adding hour of the incident, weekday (Monday....Sunday) and weekday_num (1...7) columns
+nypd_dataset_subset$incident_hour <- with(nypd_dataset_subset, hour(incident_date_time))
+nypd_dataset_subset$incident_weekday <- with(nypd_dataset_subset, weekdays(incident_date_time))
+nypd_dataset_subset$incident_weekday_num <- with(nypd_dataset_subset, wday(incident_date_time, week_start=1))
+
+```
+
+### Visualization and Analysis
+Filtering only murders.
+```{r}
+nypd_murders <- nypd_dataset_subset %>% filter(STATISTICAL_MURDER_FLAG)
+```
+
+Building a chart of number of murders for each hour of day.
+```{r}
+nypd_murders_per_hour <- nypd_murders %>% group_by(incident_hour) %>% summarise(
+  number_of_murders = n()
+)
+nypd_murders_per_hour %>% ggplot(aes(x=incident_hour, y=number_of_murders)) + geom_point() + xlab('Hour of day') + ylab('Number of Murders')
+```
+
+#### Analysis of murder hours
+
+Most murders occur during the late evening and the night - starting from 9 pm and until 2 am. The difference between day and night hours is very significant, and there are over six times more murders during the peak hour of 10 pm relative to 9 am.
+That's the time frame that the New York Police department should focus on to prevent murders. 
+This goal can be achieved by deploying more police officers on the city's streets and by encouraging citizens to stay at their homes during the night.
+
+#### Murders per weekday
+
+```{r message = FALSE}
+#murders per day of week
+murders_per_weekday <- nypd_murders %>% group_by(incident_weekday, incident_weekday_num) %>% summarise(
+  number_of_murders = n()
+) %>% arrange(incident_weekday_num)
+murders_per_weekday %>% ggplot(aes(x=reorder(incident_weekday, incident_weekday_num), y=number_of_murders)) + geom_point() + xlab('Weekday') + ylab('Number of Murders')
+
+```
+
+#### Analysis of murders per weekday
+
+Most of the murders occur during the weekends; hence police department should allocate more resources on Saturdays and Sundays. This makes a lot of sense because people have much more free time during the weekends, and therefore alcohol and drug consumption increases.
+
+### Modeling incidents trend
+
+
+The following model will show the trend over time of reported shooting incidents in New York between 2006 and 2020.
+
+<p>
+
+The data from 2020 and afterward will be filtered out as clearly because of the COVID pandemic, the trend of shooting events changed. During the COVID lockdown, the number of shooting incidents rose sharply; however, the trend should return to normal as soon as the pandemic is over.
+
+
+```{r}
+# summing all the incidents for each Quarter
+casualties_per_quarter <- nypd_dataset_subset %>% filter(incident_date_time < '2020-01-01') %>%
+  group_by(quarter = lubridate::floor_date(incident_date_time, "quarter")) %>%
+  summarise(
+    cases = n()
+  ) 
+
+#applying linear model
+cases_linear_model <- lm(cases ~ quarter, data=casualties_per_quarter)
+summary(cases_linear_model)
+casualties_per_quarter <- casualties_per_quarter %>% mutate(prediction = predict(cases_linear_model))
+casualties_per_quarter %>% ggplot() + geom_point(aes(x=quarter, y=cases), col = 'blue') + geom_point(aes(x=quarter, y=prediction), col='red') + xlab('Incident date') + ylab('Number of Incidents')
+``` 
+
+The formula for the linear regression model is 1339-7.045e-07*t.
+
+<p>
+
+The graph above shows declining trend of shoting incidents, from around 550 incidents per Quarter in 2006 to 230 at the end of 2019.
+
+
+## Conclusion and Bias
+This project identified the most frequent time intervals of murders according to the data supplied by New York Police Department.
+NYPD should promote responsible drinking and conflict avoidance, specifically during the night hours and the weekends.
+
+Bias sources include bias in the NYPD dataset and bias in my research. First, police officers reporting shooting incidents may report them differently 
+depending on whether they feel inclined towards or against the victims or the perpetrators. Secondly, my attitude towards guns or police authorities may affect the results of this research.
+
+In my opinion, the overall bias of this research is relatively low. Hence NYPD can trust the results.
+
