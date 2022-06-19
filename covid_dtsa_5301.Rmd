@@ -1,0 +1,154 @@
+---
+title: "US and Canada Covid-19 research"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intoduction
+My research compares the US and Canadian health care systems handling the Covid-19 pandemic. The study identifies the country with a higher Case Fatality Rate (the proportion of people diagnosed with Covid-19 who end up dying of it) and a higher Deaths/100K population.
+
+Libraries used in the research:
+
+```{r message = FALSE}
+library(tidyr)
+library(tidyverse)
+library(lubridate)
+library(modelr)
+```
+
+### Data transformation
+The report is based on John Hopkins University's publicly available datasets of Covid-19 daily cases and daily deaths (https://github.com/CSSEGISandData/COVID-19).
+
+In addition, the report uses US and Canadian census data published officially by government authorities.
+
+https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901 <p> https://www.census.gov/newsroom/press-releases/2021/2021-population-estimates.html
+``` {r message = FALSE}
+#download Covid cases and Covid deaths datasets and remove unused columns
+base_url = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+covid_cases_dataset_raw <- read_csv(str_c(base_url, "time_series_covid19_confirmed_global.csv"))
+
+covid_cases_dataset <- covid_cases_dataset_raw %>% select(-c(Lat,Long)) %>% rename(State = 'Province/State') %>% rename(Country = 'Country/Region')
+covid_cases_dataset <- covid_cases_dataset %>% pivot_longer(cols= -c(State, Country), names_to = "date", values_to="total_cases")
+
+covid_deaths_dataset_raw <- read_csv(str_c(base_url, "time_series_covid19_deaths_global.csv"))
+covid_deaths_dataset <- covid_deaths_dataset_raw %>% select(-c(Lat,Long)) %>% rename(State = 'Province/State') %>% rename(Country = 'Country/Region')
+covid_deaths_dataset <- covid_deaths_dataset %>% pivot_longer(cols= -c(State, Country), names_to = "date", values_to="total_deaths")
+
+#join Covid cases with Covid deaths
+covid_joined_dataset <- covid_cases_dataset %>% full_join(covid_deaths_dataset, by=c("State","Country","date"))
+
+#filter Canada, US only rows, filter out dates when pandemic has just started and the number were still low and add new columns
+covid_joined_dataset <- covid_joined_dataset %>% 
+  filter(Country == 'Canada' | Country == 'US') %>%
+  mutate(date=mdy(date)) %>%
+  filter(date > '2020-03-01') %>%
+  mutate(canada_cases = case_when(Country == 'Canada' ~ total_cases, TRUE ~ 0)) %>%
+  mutate(canada_deaths = case_when(Country == 'Canada' ~ total_deaths, TRUE ~ 0)) %>%
+  mutate(us_cases = case_when(Country == 'US' ~ total_cases, TRUE ~ 0)) %>%
+  mutate(us_deaths = case_when(Country == 'US' ~ total_deaths, TRUE ~ 0))
+
+
+#group by date and sum
+covid_dataset <- covid_joined_dataset  %>% 
+  group_by(date) %>% 
+  summarise(us_cases = sum(us_cases), us_deaths = sum(us_deaths), canada_cases = sum(canada_cases), canada_deaths=sum(canada_deaths)) 
+
+
+#add new columns new_cases and new_deaths for Canada and US
+#round the date to the nearest week to remove some noise
+covid_dataset <- covid_dataset %>% arrange(date) %>%  
+  mutate(new_us_cases=us_cases-lag(us_cases)) %>%
+  mutate(new_us_deaths=us_deaths-lag(us_deaths)) %>%
+  mutate(new_canada_cases=canada_cases-lag(canada_cases)) %>%
+  mutate(new_canada_deaths=canada_deaths-lag(canada_deaths)) %>%
+  mutate(date = floor_date(date, "week")) 
+
+
+covid_dataset <- covid_dataset  %>%   
+  group_by(date) %>% 
+  summarise(new_us_cases = sum(new_us_cases), new_us_deaths = sum(new_us_deaths), new_canada_cases = sum(new_canada_cases), new_canada_deaths=sum(new_canada_deaths)) 
+
+```
+
+### Visualization and Analysis
+
+The following chart of the Case Fatality Rate shows the ratio between 
+new cases and new deaths for US and Canada.
+
+```{r}
+#correction of wrong rows - replacing negative Canadian cases with 0, happening probably because of data collection errors
+covid_dataset <- covid_dataset %>%
+  mutate(new_canada_cases = replace(new_canada_cases, which(new_canada_cases<0), 0)) %>%
+  mutate(new_canada_deaths = replace(new_canada_deaths, which(new_canada_deaths<0), 0)) %>%
+  filter(new_canada_cases >= 0)
+
+covid_dataset %>% ggplot(aes(x=date)) + geom_line(aes(y=new_canada_deaths/new_canada_cases, colour = 'Canada')) + geom_line(aes(, y=new_us_deaths/new_us_cases, colour = 'US')) + 
+  scale_colour_manual("", 
+                      breaks = c("Canada", "US"),
+                      values = c("Canada"="red", "US"="blue")) +
+  xlab('Date') + 
+  ylab('Case Fatality Rate')
+
+
+```
+
+#### Analysis of Case Fatality Rate
+
+The chart shows that the US has a higher case fatality rate. In addition, the gap between the countries grows as time passes. The only exception is the first wave of the pandemic. However, the data for the first wave is not 100% trustworthy as the absolute numbers of deaths were still low, and Covid-19 testing was not particularly precise.
+
+#### Deaths/100K population
+
+Deaths/100K population chart shows a daily number of deaths for 100K of population for US and Canada.
+
+
+```{r message = FALSE}
+canada_population = 38526760 #https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901
+us_population = 331893745 #https://www.census.gov/newsroom/press-releases/2021/2021-population-estimates.html
+
+covid_dataset %>% ggplot(aes(x=date)) + geom_line(aes(y=new_canada_deaths/canada_population, colour = 'Canada')) + geom_line(aes(, y=new_us_deaths/us_population, colour = 'US')) + 
+  scale_colour_manual("", 
+                      breaks = c("Canada", "US"),
+                      values = c("Canada"="red", "US"="blue")) +
+  xlab('Date') + 
+  ylab('Deaths/100K population')
+
+```
+
+#### Analysis Deaths/100K population
+
+The chart shows again that the death rate is higher in the US than in Canada. Hence, the risk of dying from Covid-19 for an average US citizen is higher than for a Canadian citizen. 
+
+
+### Modeling correlation between Canadian and US Covid cases
+
+The following model will show a correlation between US and Canadian Covid-19 new cases.
+
+```{r}
+cases_linear_model <- lm(new_us_cases ~ new_canada_cases, data=covid_dataset)
+summary(cases_linear_model)
+cases_prediction <- cbind(covid_dataset, resid = resid(cases_linear_model), fitted = fitted(cases_linear_model))
+cases_prediction %>% ggplot() + geom_point(aes(x=new_canada_cases,y=new_us_cases) , col = 'red') + geom_point(aes(x=new_canada_cases,y=fitted) , col = 'blue')  +
+  xlab('New cases in Canada') + 
+  ylab('New cases in US')
+``` 
+
+The formula for the linear regression model is us_cases = 153300+17.29*canadian_cases.
+
+<p>
+
+Because the US and Canada share a border used heavily for travel and work from one country to another, there is a positive correlation between US and Canadian COVID-19 cases.
+
+
+## Conclusion and Bias
+The project compared Covid-19 statistics for Canada and US and showed that both Case Fatality Rate and Deaths/100K population metrics demonstrate that Canada has done a much better job than the US on COVID-19. This happened mainly because of the higher vaccination rates in Canada (84% of fully vaccinated Canadians vs. 67% of Americans). 
+
+Bias sources include bias in the John Hopkins dataset and my research. First, the number of conducted Covid-19 tests per capita in the US is almost twice as high as in Canada, leading to more virus detections. Secondly, there could be country-level biases to downward the number of deaths. Policies such as lockdowns have provoked protests against politicians, likely boosting pressure to document that the guidelines were effective. Finally, my attitude towards health care authorities may affect the results of this research.
+
+In my opinion, despite bias sources listed above, the overall bias of this research is relatively low. Hence its results are trustworthy.
+
