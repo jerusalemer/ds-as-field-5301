@@ -19,7 +19,6 @@ Libraries used in the research:
 library(tidyr)
 library(tidyverse)
 library(lubridate)
-library(modelr)
 ```
 
 ### Data transformation
@@ -131,7 +130,7 @@ The following model will show a correlation between US and Canadian Covid-19 new
 
 ```{r}
 cases_linear_model <- lm(new_us_cases ~ new_canada_cases, data=covid_dataset)
-summary(cases_linear_model)
+#summary(cases_linear_model)
 cases_prediction <- cbind(covid_dataset, resid = resid(cases_linear_model), fitted = fitted(cases_linear_model))
 cases_prediction %>% ggplot() + geom_point(aes(x=new_canada_cases,y=new_us_cases) , col = 'red') + geom_point(aes(x=new_canada_cases,y=fitted) , col = 'blue')  +
   xlab('New cases in Canada') + 
